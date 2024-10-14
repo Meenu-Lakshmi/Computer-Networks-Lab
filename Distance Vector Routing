@@ -84,3 +84,27 @@ int main() {
 
     return 0;
 }
+//OUTPUT
+//Distance Vector Routing using Bellman Ford Algorithm:
+//Enter number of hops: 4
+//Enter number of links: 4
+
+//Link 1: enter source, destination and weight: 
+//0 1 4
+
+//Link 2: enter source, destination and weight: 
+//1 2 6
+
+//Link 3: enter source, destination and weight: 
+//2 3 5
+
+//Link 4: enter source, destination and weight: 
+//0 3 10
+//Enter source node (0 to 3): 0
+
+//Hop	Distance from source
+//0 	 0
+//1 	 4
+//2 	 10
+//3 	 10
+
