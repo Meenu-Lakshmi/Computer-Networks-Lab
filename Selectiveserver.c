@@ -1,4 +1,4 @@
-https://github.com/cechengannur/Networking-Lab-S6/tree/main/Sliding-Window-Protocols/Selective-Repeat#include <stdio.h>
+
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -86,7 +86,7 @@ int main()
 				printf("Timeout for message :%d \n", k);
 				rsendd(k, c_sock);
 				goto qq;
-			} // a timeout occured
+			} 
 			else
 			{
 				read(c_sock, buff, sizeof(buff));
@@ -99,7 +99,7 @@ int main()
 				}
 				else
 					tot++;
-				// printf("%d %d %d \n",tot,toti,k);
+			
 			}
 		}
 	}
