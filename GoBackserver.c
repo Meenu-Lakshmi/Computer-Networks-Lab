@@ -1,134 +1,59 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <fcntl.h>
 #include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/select.h>
 
-// structure definition for designing the packet.
-struct frame
-{
-    int packet[40];
-};
-// structure definition for accepting the acknowledgement.
-struct ack
-{
-    int acknowledge[40];
-};
-int main()
-{
-    int serversocket;
-    struct sockaddr_in serveraddr, clientaddr;
-    socklen_t len;
-    struct frame f1;
-    int windowsize, totalpackets, totalframes, i = 0, j = 0, framesend = 0, k, l, buffer;
-    struct ack acknowledgement;
-    char req[50];
+#define PORT 9009
+#define TIMEOUT_SEC 2
+#define TOTAL_MSGS 10
+#define GO_BACK_N 3
 
-    serversocket = socket(AF_INET, SOCK_DGRAM, 0);
-    // AF_INET for ipv4
-    // SOCK_DGRAM for UDP
-    // 0 means :: IP protocol
-    // socket(ip version, UDP/TCP, Protocl)
+int main() {
+    int server_sock, client_sock;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t addr_size;
+    fd_set read_fds;
+    struct timeval timeout;
+    char msg[50];
+    char buffer[50];
+    int msg_num = 0;
 
-    bzero((char *)&serveraddr, sizeof(serveraddr));
+    server_sock = socket(AF_INET, SOCK_STREAM, 0);
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(PORT);
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    bind(server_sock, (struct sockaddr*)&server_addr, sizeof(server_addr));
 
-    serveraddr.sin_family = AF_INET;
-    serveraddr.sin_port = htons(5018); // port
-    serveraddr.sin_addr.s_addr = INADDR_ANY;
+    printf("\tServer Up\nGo back n (n=3) used to send 10 messages\n\n");
 
-    bind(serversocket, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
-    bzero((char *)&clientaddr, sizeof(clientaddr));
-    len = sizeof(clientaddr);
+    listen(server_sock, 10);
+    addr_size = sizeof(client_addr);
+    client_sock = accept(server_sock, (struct sockaddr*)&client_addr, &addr_size);
 
-    // connection establishment.
-    printf("\nwaiting for client connection");
-    recvfrom(serversocket, req, sizeof(req), 0,
-             (struct sockaddr *)&clientaddr, &len);
-    printf("\nThe client connection obtained\t%s\n", req);
+    while (msg_num < TOTAL_MSGS) {
+        snprintf(msg, sizeof(msg), "server message: %d", msg_num);
+        printf("Message sent to client: %s\n", msg);
+        send(client_sock, msg, strlen(msg) + 1, 0);
 
-    // sending request for windowsize.
-    printf("\nSending request for window size\n");
-    sendto(serversocket, "REQUEST FOR WINDOWSIZE", sizeof("REQUEST FOR WINDOWSIZE"), 0,
-           (struct sockaddr *)&clientaddr, sizeof(clientaddr));
+        FD_ZERO(&read_fds);
+        FD_SET(client_sock, &read_fds);
+        timeout.tv_sec = TIMEOUT_SEC;
+        timeout.tv_usec = 0;
 
-    // obtaining windowsize.
-    printf("Waiting for the window size\n");
-    recvfrom(serversocket, (char *)&windowsize, sizeof(windowsize), 0,
-             (struct sockaddr *)&clientaddr, &len);
-    printf("\nThe window size obtained as:\t %d \n", windowsize);
-    printf("\nObtaining packets from network layer \n");
-
-    totalframes = 5;
-    totalpackets = windowsize * totalframes;
-    printf("\nTotal packets obtained :%d\n", totalpackets);
-    printf("\nTotal frames or windows to be transmitted :%d\n", totalframes);
-
-    // sending details to client.
-    printf("\nSending total number of packets \n");
-    sendto(serversocket, (char *)&totalpackets, sizeof(totalpackets), 0,
-           (struct sockaddr *)&clientaddr, sizeof(clientaddr));
-    recvfrom(serversocket, req, sizeof(req), 0,
-             (struct sockaddr *)&clientaddr, &len);
-    printf("\nSending total number of frames \n");
-    sendto(serversocket, (char *)&totalframes, sizeof(totalframes), 0,
-           (struct sockaddr *)&clientaddr, sizeof(clientaddr));
-    recvfrom(serversocket, req, sizeof(req), 0,
-             (struct sockaddr *)&clientaddr, &len);
-    printf("\n Press enter to start the process \n");
-    fgets(req, 2, stdin);
-
-    // starting the process of sending
-    while (i < totalpackets)
-    {
-        // initialising the transmit buffer.
-        bzero((char *)&f1, sizeof(f1));
-        printf("\nInitializing the transmit buffer \n");
-        printf("\n The frame to be send is %d with packets:", framesend);
-        buffer = i;
-        j = 0;
-        // Building the frame.
-        while (j < windowsize && i < totalpackets)
-        {
-            printf("%d", i);
-            f1.packet[j] = i;
-            j++;
-            i++;
+        if (select(client_sock + 1, &read_fds, NULL, NULL, &timeout) > 0) {
+            recv(client_sock, buffer, sizeof(buffer), 0);
+            printf("Message from Client: %s\n", buffer);
+            msg_num++;
+        } else {
+            printf("Timeout! Going back from %d\n", msg_num);
+            msg_num = (msg_num - GO_BACK_N >= 0) ? msg_num - GO_BACK_N : 0;
         }
-        printf("sending frame %d\n", framesend);
-        // sending the frame.
-        sendto(serversocket, (char *)&f1, sizeof(f1), 0,
-               (struct sockaddr *)&clientaddr, sizeof(clientaddr));
-        // Waiting for the acknowledgement.
-        printf("Waiting for the acknowlegment\n");
-        recvfrom(serversocket, (char *)&acknowledgement, sizeof(acknowledgement), 0,
-                 (struct sockaddr *)&clientaddr, &len);
-        // Checking acknowledgement of each packet.
-        j = 0;
-        k = 0;
-        l = buffer;
-        while (j < windowsize && l < totalpackets)
-        {
-            if (acknowledgement.acknowledge[j] == -1)
-            {
-                printf("\nnegative acknowledgement received for packet:%d \n", f1.packet[j]);
-                printf("\nRetransmitting from packet:%d \n", f1.packet[j]);
-                i = f1.packet[j];
-                k = l;
-                break;
-            }
-            j++;
-            l++;
-        }
-        if (k == 0)
-        {
-            printf("\n Positive acknowledgement received for all packets,within the frame:%d \n", framesend);
-        }
-        framesend++;
-        printf("\n press enter to proceed \n");
-        fgets(req, 2, stdin);
     }
-    printf("\nAll frames sends successfully\n Closing connection with the client \n");
-    close(serversocket);
+
+    close(client_sock);
+    close(server_sock);
+    return 0;
 }
