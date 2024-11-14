@@ -1,131 +1,92 @@
-#include <stdio.h>
-#include <string.h>
-#include <sys/types.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <fcntl.h>  
-#include <unistd.h>
 
-struct frame
+#include<stdio.h>
+#include<stdlib.h>
+#include<string.h>
+#include<arpa/inet.h>
+#include<netinet/in.h>
+#include<sys/time.h>
+#include<sys/socket.h>
+
+#define PORT 4000
+#define IP "127.0.0.1"
+#define WINDOWSIZE 4
+#define BUFFERSIZE 1024
+#define TOTALFRAMES 10
+#define TIMEOUT 2
+
+typedef struct
 {
-    int packet[40];
-};
-struct ack
-{
-    int acknowledge[40];
-};
-int main()
-{
-    int serversocket;
-    struct sockaddr_in serveraddr, clientaddr;
-    socklen_t len;
-    struct frame f1;
-    int windowsize, totalpackets, totalframes, i = 0, j = 0, framesend = 0, k, l, buffer, m, n, repacket[50];
-    struct ack acknowledgement;
-    char req[50];
+    int valid; //used to denote whether the frame is acknowledged or not
+    int seqNo;
+    char buffer[BUFFERSIZE];
+}Frame;
 
-    serversocket = socket(AF_INET, SOCK_DGRAM, 0);
-    bzero((char *)&serveraddr, sizeof(serveraddr));
-    
-    serveraddr.sin_family = AF_INET;
-    serveraddr.sin_port = htons(5018);
-    serveraddr.sin_addr.s_addr = INADDR_ANY;
-    
-    bind(serversocket, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
-    bzero((char *)&clientaddr, sizeof(clientaddr));
-    len = sizeof(clientaddr);
+int main() {
+    int sockfd;
+    struct sockaddr_in server_addr;
+    socklen_t addrlen = sizeof(struct sockaddr_in);
+    Frame dataFrame,ackFrame;
+    int framesize = sizeof(Frame);
 
-    printf("\nwaiting for client connection");
-    recvfrom(serversocket, req, sizeof(req), 0,
-             (struct sockaddr *)&clientaddr, &len);
-    printf("\nThe client connection obtained\t%s\n", req);
-
-    printf("\nSending request for window size\n");
-    sendto(serversocket, "REQUEST FOR WINDOWSIZE", sizeof("REQUEST FOR WINDOWSIZE"), 0,
-           (struct sockaddr *)&clientaddr, sizeof(clientaddr));
-
-    printf("Waiting for the window size\n");
-    recvfrom(serversocket, (char *)&windowsize, sizeof(windowsize), 0,
-             (struct sockaddr *)&clientaddr, &len);
-    printf("\nThe window size obtained as:\t %d \n", windowsize);
-    
-    printf("\nObtaining packets from network layer \n");
-    printf("\nTotal packets obtained :%d\n", (totalpackets = windowsize * 5));
-    printf("\nTotal frames or windows to be transmitted :%d\n", (totalframes = 5));
-
-    printf("\nSending total number of packets \n");
-    sendto(serversocket, (char *)&totalpackets, sizeof(totalpackets), 0,
-           (struct sockaddr *)&clientaddr, sizeof(clientaddr));
-    recvfrom(serversocket, req, sizeof(req), 0,
-             (struct sockaddr *)&clientaddr, &len);
-    
-    printf("\nSending total number of frames \n");
-    sendto(serversocket, (char *)&totalframes, sizeof(totalframes), 0,
-           (struct sockaddr *)&clientaddr, sizeof(clientaddr));
-    recvfrom(serversocket, req, sizeof(req), 0,
-             (struct sockaddr *)&clientaddr, &len);
-    
-    printf("\n Press enter to start the process \n");
-    fgets(req, 2, stdin);
-  
-    j = 0;
-    l = 0;
-    while (l < totalpackets)
-    {
-        bzero((char *)&f1, sizeof(f1));
-        printf("\nInitializing the transmit buffer \n");
-        printf("\n The frame to be send is %d with packets:", framesend);
-        for (m = 0; m < j; m++)
-        {
-            printf("%d", repacket[m]);
-            f1.packet[m] = repacket[m];
-        }
-        while (j < windowsize && i < totalpackets)
-        {
-            printf("%d", i);
-            f1.packet[j] = i;
-            j++;
-            i++;
-        }
-    
-        printf("sending frame %d\n", framesend);
-        sendto(serversocket, (char *)&f1, sizeof(f1), 0,
-               (struct sockaddr *)&clientaddr, sizeof(clientaddr));
-        printf("Waiting for the acknowlegment\n");
-        recvfrom(serversocket, (char *)&acknowledgement, sizeof(acknowledgement), 0,
-                 (struct sockaddr *)&clientaddr, &len);
-        j = 0;
-        k = 0;
-        m = 0;
-        n = l;
-    
-        while (m < windowsize && n < totalpackets)
-        {
-            if (acknowledgement.acknowledge[m] == -1)
-            {
-                printf("\nnegative acknowledgement received for packet:%d \n", f1.packet[m]);
-                k = 1;
-                repacket[j] = f1.packet[m];
-                j++;
-            }
-            else
-            {
-                l++;
-            }
-
-            m++;
-
-            n++;
-        }
-
-        if (k == 0)
-        {
-            printf("\n Positive acknowledgement received for all packets,within the frame:%d \n", framesend);
-        }
-        framesend++;
-        printf("\n press enter to proceed \n");
-        fgets(req, 2, stdin);
+    if((sockfd=socket(AF_INET,SOCK_DGRAM,0))==-1) {
+        perror("socket");
+        exit(1);
     }
-    printf("\nAll frames sends successfully\n Closing connection with the client \n");
-    close(serversocket);
+
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(PORT);
+    server_addr.sin_addr.s_addr = inet_addr(IP);
+
+    struct timeval tv;
+    tv.tv_sec = TIMEOUT;
+    tv.tv_usec = 0;
+    if(setsockopt(sockfd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv))<0) {
+        perror("setsockopt");
+        exit(1);
+    }
+
+    int base = 0;
+    int nextSeqNo = 0;
+    Frame buffer[TOTALFRAMES];
+    for(int i=0;i<TOTALFRAMES;i++) {
+        buffer[i].valid = 0;
+    }
+
+    while(base<TOTALFRAMES) {
+        while(nextSeqNo<base+WINDOWSIZE && nextSeqNo<TOTALFRAMES) {
+            dataFrame.seqNo = nextSeqNo;
+            sendto(sockfd,&dataFrame,framesize,0,(struct sockaddr *)&server_addr,addrlen);
+            printf("Frame-%d sent\n",dataFrame.seqNo);
+            buffer[nextSeqNo] = dataFrame;
+            nextSeqNo++;
+        }
+        int valread = recvfrom(sockfd,&ackFrame,framesize,0,(struct sockaddr *)&server_addr,&addrlen);
+        if(valread>0) {
+            if(ackFrame.seqNo>=0 && ackFrame.seqNo<TOTALFRAMES) {
+                printf("ACK recieved for Frame-%d\n",ackFrame.seqNo);
+                ackFrame.valid = 1;
+                buffer[ackFrame.seqNo] = ackFrame;
+                if(ackFrame.seqNo==base) {
+                    base++;
+                    while(base<TOTALFRAMES && buffer[base].valid==1) {
+                        printf("Sliding window : Frame-%d already acknowledged\n",base);
+                        base++;
+                    }
+                }
+            }
+            else {
+                printf("Invalid ACK recieved\n");
+            }
+        } else {
+            printf("Timeout ! Resending frames from %d to %d\n",base,nextSeqNo-1);
+            for(int i=base;i<nextSeqNo && i<TOTALFRAMES;i++) {
+                if(buffer[i].valid==0) {
+                    sendto(sockfd,&buffer[i],framesize,0,(struct sockaddr *)&server_addr,addrlen);
+                    printf("Resent Frame-%d\n",buffer[i].seqNo);
+                }
+            }
+        }
+    }
+    printf("All frames sent and acknowledged !\n");
+
 }
